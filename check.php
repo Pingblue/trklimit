@@ -45,8 +45,9 @@ file_put_contents($logFile, "Got " . (count($req->val) / 7) . " torrents\n", FIL
 $commandsToRun = new rXMLRPCRequest();
 $hasCommands = false;
 $publicCount = 0;
+$dhtCount = 0;
 
-// Process torrents (every 7 items is one torrent now)
+// Process torrents (every 7 items is one torrent)
 for($i = 0; $i < count($req->val); $i += 7) {
     $hash = $req->val[$i];
     $name = $req->val[$i + 1];
@@ -56,35 +57,69 @@ for($i = 0; $i < count($req->val); $i += 7) {
     $isOpen = $req->val[$i + 5];
     $isActive = $req->val[$i + 6];
 
+    file_put_contents($logFile, "\nProcessing: " . substr($name, 0, 40) . "\n", FILE_APPEND);
+
     // Get trackers for this torrent
     $reqTrackers = new rXMLRPCRequest(new rXMLRPCCommand("t.multicall", array($hash, "", "t.url=")));
     if(!$reqTrackers->run() || $reqTrackers->fault) {
+        file_put_contents($logFile, "  ERROR: Could not get trackers\n", FILE_APPEND);
         continue;
     }
 
     // Build tracker string
     $trackerString = '';
+    $trackerCount = 0;
+    $hasRealTracker = false;
+
     foreach($reqTrackers->val as $tracker) {
-        $trackerString .= strtolower($tracker) . '#';
+        $trackerLower = strtolower($tracker);
+        $trackerString .= $trackerLower . '#';
+        $trackerCount++;
+
+        // Check if it's a real tracker (not dht://)
+        if(!empty($trackerLower) && strpos($trackerLower, 'dht://') !== 0) {
+            $hasRealTracker = true;
+        }
     }
 
-    // Check if it's a public tracker
+    file_put_contents($logFile, "  Tracker count: $trackerCount\n", FILE_APPEND);
+    if($trackerCount > 0) {
+        file_put_contents($logFile, "  Trackers: " . substr($trackerString, 0, 100) . "\n", FILE_APPEND);
+    }
+
+    // Check if it's a public tracker or DHT-only
     $isPublic = false;
-    foreach($restrictedTrackers as $trk) {
-        if(stripos($trackerString, strtolower($trk)) !== false) {
-            $isPublic = true;
-            $publicCount++;
-            file_put_contents($logFile, "Found public: " . substr($name, 0, 30) . "\n", FILE_APPEND);
-            break;
+    $isDHT = false;
+
+    // DHT-only: either no trackers at all, or only dht:// trackers
+    if(empty($trackerString) || !$hasRealTracker) {
+        // No trackers or only DHT = DHT-only torrent
+        $isPublic = true;
+        $isDHT = true;
+        $dhtCount++;
+        file_put_contents($logFile, "  → DHT-only (no real trackers)\n", FILE_APPEND);
+    } else {
+        // Check against restricted tracker list
+        foreach($restrictedTrackers as $trk) {
+            if(stripos($trackerString, strtolower($trk)) !== false) {
+                $isPublic = true;
+                $publicCount++;
+                file_put_contents($logFile, "  → PUBLIC (matched: $trk)\n", FILE_APPEND);
+                break;
+            }
+        }
+        if(!$isPublic) {
+            file_put_contents($logFile, "  → PRIVATE (no match)\n", FILE_APPEND);
         }
     }
 
     // Apply actions based on public/private status
     if($isPublic) {
-        // Mark as public if not already marked
+        // Mark as Public (both DHT and public trackers use same label)
         if($xthrottle != 'Public') {
             $commandsToRun->addCommand(new rXMLRPCCommand('d.custom.set', array($hash, 'x-throttle', 'Public')));
             $hasCommands = true;
+            file_put_contents($logFile, "  Action: Set x-throttle=Public\n", FILE_APPEND);
         }
 
         // Apply throttle if not already applied
@@ -98,24 +133,26 @@ for($i = 0; $i < count($req->val); $i += 7) {
                 $commandsToRun->addCommand(new rXMLRPCCommand('d.throttle_name.set', array($hash, 'trklimit')));
             }
             $hasCommands = true;
+            file_put_contents($logFile, "  Action: Apply throttle\n", FILE_APPEND);
         }
 
         // Close if complete and preventUpload is enabled
         if($preventUpload && $complete == 1 && $isOpen == 1) {
             $commandsToRun->addCommand(new rXMLRPCCommand('d.close', array($hash)));
             $hasCommands = true;
-            file_put_contents($logFile, "  Closing completed torrent: " . substr($name, 0, 30) . "\n", FILE_APPEND);
+            file_put_contents($logFile, "  Action: Close (completed)\n", FILE_APPEND);
         }
     } else {
         // Mark as private
         if($xthrottle != 'Private' && $xthrottle != '') {
             $commandsToRun->addCommand(new rXMLRPCCommand('d.custom.set', array($hash, 'x-throttle', 'Private')));
             $hasCommands = true;
+            file_put_contents($logFile, "  Action: Set x-throttle=Private\n", FILE_APPEND);
         }
     }
 }
 
-file_put_contents($logFile, "Public torrents found: $publicCount, Has commands: " . ($hasCommands ? "YES" : "NO") . "\n", FILE_APPEND);
+file_put_contents($logFile, "\nSummary - Public: $publicCount, DHT-only: $dhtCount, Has commands: " . ($hasCommands ? "YES" : "NO") . "\n", FILE_APPEND);
 
 // Execute all commands
 if($hasCommands) {
