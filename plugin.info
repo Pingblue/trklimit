@@ -1,0 +1,9 @@
+plugin.description: The plug-in is intended to restrict upload on public trackers.
+plugin.author: Pingblue
+plugin.version: 1.0
+plugin.runlevel: 12
+rtorrent.php.error: conf.php
+rtorrent.remote: error
+rtorrent.external.error: php
+rtorrent.version: 0.16.0
+php.extensions.error: json
