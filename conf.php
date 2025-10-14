@@ -6,16 +6,6 @@ $MAX_DL_LIMIT = 0;    // Download limit (0 = unlimited)
 $preventUpload = true; // Close torrents when completed
 
 $restrictedTrackers = array(
-    // Original trackers
-    'openbittorrent',
-    'publicbt',
-    'istole.it',
-    'coppersurfer.tk',
-    'glotorrents',
-    'torrentz.eu',
-    '1337x',
-
-    // New trackers from list
     'tracker.opentrackr.org',
     'retracker.lanta-net.ru',
     'tracker.openbittorrent.com',
@@ -269,3 +259,4 @@ $restrictedTrackers = array(
     'discord.heihachi.pw',
     'tr.nyacat.pw'
 );
+
