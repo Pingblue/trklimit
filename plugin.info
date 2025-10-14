@@ -7,3 +7,5 @@ rtorrent.remote: error
 rtorrent.external.error: php
 rtorrent.version: 0.16.0
 php.extensions.error: json
+plugin.may_be_shutdowned: 0
+plugin.may_be_launched: 0
