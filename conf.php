@@ -257,6 +257,7 @@ $restrictedTrackers = array(
     'tr.kxmp.cf',
     'ns-1.x-fins.com',
     'discord.heihachi.pw',
-    'tr.nyacat.pw'
+    'tr.nyacat.pw',
+    'bt4.t-ru.org'
 );
 
