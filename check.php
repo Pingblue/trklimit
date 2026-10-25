@@ -7,15 +7,30 @@ if(count($argv) > 1)
 
 require_once( dirname(__FILE__).'/../../php/xmlrpc.php' );
 
-// Debug log
+// Debug logging toggle: set to true to enable the debug log
+$debug = false;
 $logFile = '/tmp/tracklimits_check_debug.log';
-file_put_contents($logFile, date('Y-m-d H:i:s') . " - Check script started\n", FILE_APPEND);
+
+// Writes to the log only when $debug is true
+function dbg($msg) {
+    global $debug, $logFile;
+    if($debug)
+        file_put_contents($logFile, $msg, FILE_APPEND);
+}
+
+// Errors are always logged, regardless of $debug
+function errlog($msg) {
+    global $logFile;
+    file_put_contents($logFile, date('Y-m-d H:i:s') . " - " . $msg, FILE_APPEND);
+}
+
+dbg(date('Y-m-d H:i:s') . " - Check script started\n");
 
 // Load plugin configuration
 $confFile = dirname(__FILE__).'/conf.php';
 if(file_exists($confFile)) {
     include($confFile);
-    file_put_contents($logFile, "Config loaded\n", FILE_APPEND);
+    dbg("Config loaded\n");
 }
 
 // Get all torrents
@@ -30,17 +45,17 @@ $req = new rXMLRPCRequest(new rXMLRPCCommand('d.multicall', array(
     'd.is_active='
 )));
 
-file_put_contents($logFile, "Sending XMLRPC request...\n", FILE_APPEND);
+dbg("Sending XMLRPC request...\n");
 
 if(!$req->run() || $req->fault) {
-    file_put_contents($logFile, "XMLRPC FAILED\n", FILE_APPEND);
+    errlog("XMLRPC FAILED\n");
     if($req->fault) {
-        file_put_contents($logFile, "Fault: " . print_r($req->val, true) . "\n", FILE_APPEND);
+        errlog("Fault: " . print_r($req->val, true) . "\n");
     }
     exit(1);
 }
 
-file_put_contents($logFile, "Got " . (count($req->val) / 7) . " torrents\n", FILE_APPEND);
+dbg("Got " . (count($req->val) / 7) . " torrents\n");
 
 $commandsToRun = new rXMLRPCRequest();
 $hasCommands = false;
@@ -57,12 +72,12 @@ for($i = 0; $i < count($req->val); $i += 7) {
     $isOpen = $req->val[$i + 5];
     $isActive = $req->val[$i + 6];
 
-    file_put_contents($logFile, "\nProcessing: " . substr($name, 0, 40) . "\n", FILE_APPEND);
+    dbg("\nProcessing: " . substr($name, 0, 40) . "\n");
 
     // Get trackers for this torrent
     $reqTrackers = new rXMLRPCRequest(new rXMLRPCCommand("t.multicall", array($hash, "", "t.url=")));
     if(!$reqTrackers->run() || $reqTrackers->fault) {
-        file_put_contents($logFile, "  ERROR: Could not get trackers\n", FILE_APPEND);
+        errlog("ERROR: Could not get trackers for " . substr($name, 0, 40) . "\n");
         continue;
     }
 
@@ -82,9 +97,9 @@ for($i = 0; $i < count($req->val); $i += 7) {
         }
     }
 
-    file_put_contents($logFile, "  Tracker count: $trackerCount\n", FILE_APPEND);
+    dbg("  Tracker count: $trackerCount\n");
     if($trackerCount > 0) {
-        file_put_contents($logFile, "  Trackers: " . substr($trackerString, 0, 100) . "\n", FILE_APPEND);
+        dbg("  Trackers: " . substr($trackerString, 0, 100) . "\n");
     }
 
     // Check if it's a public tracker or DHT-only
@@ -97,19 +112,19 @@ for($i = 0; $i < count($req->val); $i += 7) {
         $isPublic = true;
         $isDHT = true;
         $dhtCount++;
-        file_put_contents($logFile, "  → DHT-only (no real trackers)\n", FILE_APPEND);
+        dbg("  → DHT-only (no real trackers)\n");
     } else {
         // Check against restricted tracker list
         foreach($restrictedTrackers as $trk) {
             if(stripos($trackerString, strtolower($trk)) !== false) {
                 $isPublic = true;
                 $publicCount++;
-                file_put_contents($logFile, "  → PUBLIC (matched: $trk)\n", FILE_APPEND);
+                dbg("  → PUBLIC (matched: $trk)\n");
                 break;
             }
         }
         if(!$isPublic) {
-            file_put_contents($logFile, "  → PRIVATE (no match)\n", FILE_APPEND);
+            dbg("  → PRIVATE (no match)\n");
         }
     }
 
@@ -119,7 +134,7 @@ for($i = 0; $i < count($req->val); $i += 7) {
         if($xthrottle != 'Public') {
             $commandsToRun->addCommand(new rXMLRPCCommand('d.custom.set', array($hash, 'x-throttle', 'Public')));
             $hasCommands = true;
-            file_put_contents($logFile, "  Action: Set x-throttle=Public\n", FILE_APPEND);
+            dbg("  Action: Set x-throttle=Public\n");
         }
 
         // Apply throttle if not already applied
@@ -133,36 +148,36 @@ for($i = 0; $i < count($req->val); $i += 7) {
                 $commandsToRun->addCommand(new rXMLRPCCommand('d.throttle_name.set', array($hash, 'trklimit')));
             }
             $hasCommands = true;
-            file_put_contents($logFile, "  Action: Apply throttle\n", FILE_APPEND);
+            dbg("  Action: Apply throttle\n");
         }
 
         // Close if complete and preventUpload is enabled
         if($preventUpload && $complete == 1 && $isOpen == 1) {
             $commandsToRun->addCommand(new rXMLRPCCommand('d.close', array($hash)));
             $hasCommands = true;
-            file_put_contents($logFile, "  Action: Close (completed)\n", FILE_APPEND);
+            dbg("  Action: Close (completed)\n");
         }
     } else {
         // Mark as private
         if($xthrottle != 'Private' && $xthrottle != '') {
             $commandsToRun->addCommand(new rXMLRPCCommand('d.custom.set', array($hash, 'x-throttle', 'Private')));
             $hasCommands = true;
-            file_put_contents($logFile, "  Action: Set x-throttle=Private\n", FILE_APPEND);
+            dbg("  Action: Set x-throttle=Private\n");
         }
     }
 }
 
-file_put_contents($logFile, "\nSummary - Public: $publicCount, DHT-only: $dhtCount, Has commands: " . ($hasCommands ? "YES" : "NO") . "\n", FILE_APPEND);
+dbg("\nSummary - Public: $publicCount, DHT-only: $dhtCount, Has commands: " . ($hasCommands ? "YES" : "NO") . "\n");
 
 // Execute all commands
 if($hasCommands) {
-    file_put_contents($logFile, "Executing commands...\n", FILE_APPEND);
+    dbg("Executing commands...\n");
     if($commandsToRun->run() && !$commandsToRun->fault) {
-        file_put_contents($logFile, "Commands executed successfully\n", FILE_APPEND);
+        dbg("Commands executed successfully\n");
     } else {
-        file_put_contents($logFile, "Commands FAILED: " . print_r($commandsToRun->val, true) . "\n", FILE_APPEND);
+        errlog("Commands FAILED: " . print_r($commandsToRun->val, true) . "\n");
     }
 }
 
-file_put_contents($logFile, "Script complete\n\n", FILE_APPEND);
+dbg("Script complete\n\n");
 exit(0);
